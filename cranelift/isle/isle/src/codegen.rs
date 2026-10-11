@@ -327,6 +327,22 @@ impl<T> Length for alloc::vec::Vec<T> {{
     }}
 }}
 
+pub trait Push<T> {{
+    fn push(&mut self, value: T);
+}}
+
+impl<T> Push<T> for alloc::vec::Vec<T> {{
+    fn push(&mut self, value: T) {{
+        alloc::vec::Vec::push(self, value)
+    }}
+}}
+
+impl<A: smallvec::Array> Push<A::Item> for smallvec::SmallVec<A> {{
+    fn push(&mut self, value: A::Item) {{
+        smallvec::SmallVec::push(self, value)
+    }}
+}}
+
 pub struct ContextIterWrapper<I, C> {{
     iter: I,
     _ctx: core::marker::PhantomData<C>,
@@ -374,6 +390,11 @@ impl<I: IntoIterator, C: Context> IntoContextIter for ContextIterWrapper<I, C> {
             iter: self.iter.into_iter(),
             _ctx: core::marker::PhantomData
         }}
+    }}
+}}
+impl<T, P: Push<T>, C> Push<T> for ContextIterWrapper<P, C> {{
+    fn push(&mut self, value: T) {{
+        self.iter.push(value);
     }}
 }}
 impl<T, E: Extend<T>, C> Extend<T> for ContextIterWrapper<E, C> {{
@@ -567,10 +588,10 @@ impl<L: Length, C> Length for ContextIterWrapper<L, C> {{
             let (_, ret) = self.ty(sig.ret_tys[0]);
 
             if let ReturnKind::Iterator = sig.ret_kind {
+                let indent = &ctx.indent;
                 writeln!(
                     ctx.out,
-                    "{}    returns: &mut (impl Extend<{}> + Length),",
-                    &ctx.indent, ret
+                    "{indent}    returns: &mut (impl Push<{ret}> + Extend<{ret}> + Length),",
                 )?;
             }
 
@@ -834,7 +855,7 @@ impl<L: Length, C> Length for ContextIterWrapper<L, C> {{
                                 ReturnKind::Plain | ReturnKind::Option => {
                                     write!(ctx.out, "return ")?
                                 }
-                                ReturnKind::Iterator => write!(ctx.out, "returns.extend(Some(")?,
+                                ReturnKind::Iterator => write!(ctx.out, "returns.push(")?,
                             }
                             self.emit_expr(ctx, result)?;
                             if ctx.is_ref.contains(&result) {
@@ -843,7 +864,7 @@ impl<L: Length, C> Length for ContextIterWrapper<L, C> {{
                             match ret_kind {
                                 ReturnKind::Plain | ReturnKind::Option => writeln!(ctx.out, ";")?,
                                 ReturnKind::Iterator => {
-                                    writeln!(ctx.out, "));")?;
+                                    writeln!(ctx.out, ");")?;
                                     writeln!(
                                         ctx.out,
                                         "{}if returns.len() >= MAX_ISLE_RETURNS {{ {} }}",
